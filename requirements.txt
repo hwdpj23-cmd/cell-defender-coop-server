@@ -1,0 +1,2 @@
+pygame-ce>=2.5.3,<3.0
+websockets>=16.1,<17
