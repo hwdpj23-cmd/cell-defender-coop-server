@@ -47,6 +47,17 @@ class Room:
     guest: Peer | None = None
     created: float = field(default_factory=time.monotonic)
     started: bool = False
+    # Pakiety czasu rzeczywistego są nadpisywane najnowszą wersją zamiast
+    # kolejkować się przy chwilowym spadku transferu. To zapobiega sytuacji,
+    # w której gość ogląda świat sprzed kilku sekund.
+    latest_snapshot: dict[str, Any] | None = None
+    latest_input: dict[str, Any] | None = None
+    snapshot_event: asyncio.Event = field(default_factory=asyncio.Event)
+    input_event: asyncio.Event = field(default_factory=asyncio.Event)
+    snapshot_task: asyncio.Task[Any] | None = None
+    input_task: asyncio.Task[Any] | None = None
+    dropped_snapshots: int = 0
+    dropped_inputs: int = 0
 
 
 ROOMS: dict[str, Room] = {}
@@ -121,6 +132,57 @@ async def global_chat(socket: web.WebSocketResponse, payload: dict[str, Any]) ->
     await broadcast_global(message)
 
 
+async def realtime_forwarder(room: Room, message_type: str, min_interval: float) -> None:
+    """Przekazuje wyłącznie najnowszy snapshot albo input z ograniczoną częstotliwością."""
+    event = room.snapshot_event if message_type == "snapshot" else room.input_event
+    last_send = 0.0
+    try:
+        while ROOMS.get(room.code) is room:
+            await event.wait()
+            event.clear()
+            delay = min_interval - (time.monotonic() - last_send)
+            if delay > 0:
+                await asyncio.sleep(delay)
+            if message_type == "snapshot":
+                payload = room.latest_snapshot
+                room.latest_snapshot = None
+                target = room.guest
+            else:
+                payload = room.latest_input
+                room.latest_input = None
+                target = room.host
+            if payload is None or target is None or target.socket.closed:
+                continue
+            try:
+                await send_json(target.socket, payload)
+                last_send = time.monotonic()
+            except Exception:
+                # cleanup połączenia usunie pokój lub gościa; pętla nie może
+                # blokować obsługi pozostałych klientów.
+                await asyncio.sleep(0)
+    except asyncio.CancelledError:
+        pass
+
+
+def start_realtime_tasks(room: Room) -> None:
+    if room.snapshot_task is None or room.snapshot_task.done():
+        room.snapshot_task = asyncio.create_task(
+            realtime_forwarder(room, "snapshot", 1 / 22),
+            name=f"snapshot-{room.code}",
+        )
+    if room.input_task is None or room.input_task.done():
+        room.input_task = asyncio.create_task(
+            realtime_forwarder(room, "input", 1 / 35),
+            name=f"input-{room.code}",
+        )
+
+
+def cancel_realtime_tasks(room: Room) -> None:
+    for task in (room.snapshot_task, room.input_task):
+        if task and not task.done():
+            task.cancel()
+
+
 async def cleanup(socket: web.WebSocketResponse) -> None:
     global_peer = GLOBAL_CLIENTS.pop(id(socket), None)
     if global_peer:
@@ -136,6 +198,7 @@ async def cleanup(socket: web.WebSocketResponse) -> None:
     if room.host.socket is socket:
         other = room.guest
         ROOMS.pop(code, None)
+        cancel_realtime_tasks(room)
     elif room.guest and room.guest.socket is socket:
         other = room.host
         room.guest = None
@@ -156,6 +219,7 @@ async def create_room(socket: web.WebSocketResponse, payload: dict[str, Any]) ->
     nickname = str(payload.get("nickname", "Gracz 1"))[:24]
     room = Room(code, Peer(socket, "host", nickname))
     ROOMS[code] = room
+    start_realtime_tasks(room)
     SOCKET_ROOM[id(socket)] = code
     await send_json(socket, {"type": "room_created", "room": code, "role": "host", "nickname": nickname})
     LOG.info("Utworzono pokój %s", code)
@@ -198,9 +262,26 @@ async def relay(socket: web.WebSocketResponse, payload: dict[str, Any]) -> None:
         return
     if msg_type == "start":
         room.started = True
+
+    payload["relay_role"] = "host" if sender_is_host else "guest"
+
+    # Snapshot i input są stanem chwilowym. Stary pakiet jest bezwartościowy,
+    # dlatego serwer zachowuje tylko najnowszy i przekazuje go w osobnej pętli.
+    if msg_type == "snapshot" and sender_is_host:
+        if room.latest_snapshot is not None:
+            room.dropped_snapshots += 1
+        room.latest_snapshot = payload
+        room.snapshot_event.set()
+        return
+    if msg_type == "input" and not sender_is_host:
+        if room.latest_input is not None:
+            room.dropped_inputs += 1
+        room.latest_input = payload
+        room.input_event.set()
+        return
+
     if target is None or target.socket.closed:
         return
-    payload["relay_role"] = "host" if sender_is_host else "guest"
     try:
         await send_json(target.socket, payload)
     except Exception:
@@ -280,6 +361,8 @@ async def stats(request: web.Request) -> web.Response:
         "rooms": len(ROOMS),
         "players": sum(1 + int(room.guest is not None) for room in ROOMS.values()),
         "started_rooms": sum(int(room.started) for room in ROOMS.values()),
+        "dropped_snapshots": sum(room.dropped_snapshots for room in ROOMS.values()),
+        "dropped_inputs": sum(room.dropped_inputs for room in ROOMS.values()),
         "global_chat_online": len(GLOBAL_CLIENTS),
         "global_chat_history": len(GLOBAL_HISTORY),
         "uptime_note": "Pokoje i historia chatu są przechowywane w pamięci serwera.",
@@ -329,6 +412,7 @@ async def stale_room_cleaner(app: web.Application) -> None:
             room = ROOMS.pop(code, None)
             if not room:
                 continue
+            cancel_realtime_tasks(room)
             for peer in (room.host, room.guest):
                 if peer:
                     SOCKET_ROOM.pop(id(peer.socket), None)
