@@ -1,18 +1,18 @@
 {
-  "version": "2.2.1",
-  "published_at": "2026-08-02T10:54:11Z",
-  "notes": "Naprawiono skalowanie interfejsu, zachowanie proporcji, obsluge DPI 125/150 procent oraz nachodzace na siebie elementy menu.",
+  "version": "2.2.2",
+  "published_at": "2026-08-02T18:43:09Z",
+  "notes": "Naprawiono opoznienia CO-OP: przewidywanie ruchu goscia, interpolacja, odrzucanie starych snapshotow, mniejsze paczki i szybsza synchronizacja.",
   "mandatory": false,
   "packages": {
     "source": {
-      "url": "https://github.com/hwdpj23-cmd/cell-defender-coop-server/releases/download/v2.2.2/cell-defender-windows-2.2.2.zip"
-      "sha256": "9c9d857a1fa256fc697f8a4221f1e782b3dd31854b620fa649e3436a583810fb",
-      "size": 3246194
+      "url": "/updates/cell-defender-source-2.2.2.zip",
+      "sha256": "57071dabfdb7e7f9913fbf31a3db8410f63d7378f9d6e67711d0325c11889e07",
+      "size": 2841234
     },
     "windows": {
-      "url": "https://github.com/hwdpj23-cmd/cell-defender-coop-server/releases/download/v2.2.1/cell-defender-windows-2.2.1.zip",
-      "sha256": "a47fc989185bb582b181579503ed564dd87ccce96f918612842c1da8f666efbd",
-      "size": 21280231
+      "url": "https://github.com/hwdpj23-cmd/cell-defender-coop-server/releases/download/v2.2.2/cell-defender-windows-2.2.2.zip",
+      "sha256": "TUTAJ_HASH_WYGENEROWANY_PRZEZ_SKRYPT",
+      "size": 0
     }
   }
 }
