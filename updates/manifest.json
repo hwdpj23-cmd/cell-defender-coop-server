@@ -5,7 +5,7 @@
   "mandatory": false,
   "packages": {
     "source": {
-      "url": "/updates/cell-defender-source-2.2.1.zip",
+      "url": "https://github.com/hwdpj23-cmd/cell-defender-coop-server/releases/download/v2.2.2/cell-defender-windows-2.2.2.zip"
       "sha256": "9c9d857a1fa256fc697f8a4221f1e782b3dd31854b620fa649e3436a583810fb",
       "size": 3246194
     },
