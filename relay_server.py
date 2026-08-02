@@ -7,6 +7,7 @@ import logging
 import random
 import string
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,13 @@ class Peer:
 
 
 @dataclass
+class GlobalPeer:
+    socket: web.WebSocketResponse
+    nickname: str
+    last_sent: float = 0.0
+
+
+@dataclass
 class Room:
     code: str
     host: Peer
@@ -43,6 +51,9 @@ class Room:
 
 ROOMS: dict[str, Room] = {}
 SOCKET_ROOM: dict[int, str] = {}
+GLOBAL_CLIENTS: dict[int, GlobalPeer] = {}
+GLOBAL_HISTORY: deque[dict[str, Any]] = deque(maxlen=60)
+GLOBAL_CHAT_COOLDOWN = 0.8
 
 
 def room_code() -> str:
@@ -58,7 +69,63 @@ async def send_json(socket: web.WebSocketResponse, payload: dict[str, Any]) -> N
         await socket.send_str(json.dumps(payload, separators=(",", ":"), ensure_ascii=False))
 
 
+def clean_text(value: Any, limit: int) -> str:
+    text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    text = "".join(ch for ch in text if ch.isprintable())
+    return " ".join(text.split())[:limit]
+
+
+async def broadcast_global(payload: dict[str, Any]) -> None:
+    stale: list[int] = []
+    for socket_id, peer in list(GLOBAL_CLIENTS.items()):
+        try:
+            await send_json(peer.socket, payload)
+        except Exception:
+            stale.append(socket_id)
+    for socket_id in stale:
+        GLOBAL_CLIENTS.pop(socket_id, None)
+
+
+async def broadcast_global_status() -> None:
+    await broadcast_global({"type": "global_status", "online": len(GLOBAL_CLIENTS)})
+
+
+async def global_join(socket: web.WebSocketResponse, payload: dict[str, Any]) -> None:
+    nickname = clean_text(payload.get("nickname", "Komórka"), 24) or "Komórka"
+    GLOBAL_CLIENTS[id(socket)] = GlobalPeer(socket, nickname)
+    await send_json(socket, {"type": "global_history", "messages": list(GLOBAL_HISTORY)})
+    await broadcast_global_status()
+    LOG.info("%s dołączył do chatu globalnego", nickname)
+
+
+async def global_chat(socket: web.WebSocketResponse, payload: dict[str, Any]) -> None:
+    peer = GLOBAL_CLIENTS.get(id(socket))
+    if not peer:
+        await send_json(socket, {"type": "error", "message": "Najpierw połącz się z chatem globalnym."})
+        return
+    now = time.monotonic()
+    if now - peer.last_sent < GLOBAL_CHAT_COOLDOWN:
+        await send_json(socket, {"type": "error", "message": "Pisz trochę wolniej."})
+        return
+    text = clean_text(payload.get("text", ""), 180)
+    if not text:
+        return
+    peer.last_sent = now
+    message = {
+        "type": "global_chat",
+        "nickname": peer.nickname,
+        "text": text,
+        "timestamp": int(time.time()),
+    }
+    GLOBAL_HISTORY.append(message)
+    await broadcast_global(message)
+
+
 async def cleanup(socket: web.WebSocketResponse) -> None:
+    global_peer = GLOBAL_CLIENTS.pop(id(socket), None)
+    if global_peer:
+        await broadcast_global_status()
+        LOG.info("%s opuścił chat globalny", global_peer.nickname)
     code = SOCKET_ROOM.pop(id(socket), None)
     if not code:
         return
@@ -164,6 +231,13 @@ async def websocket_handler(request: web.Request) -> web.StreamResponse:
                 msg_type = str(payload.get("type", ""))
                 if msg_type == "ping":
                     await send_json(socket, {"type": "pong", "token": payload.get("token", "")})
+                elif msg_type == "global_join":
+                    await global_join(socket, payload)
+                elif msg_type == "global_chat":
+                    await global_chat(socket, payload)
+                elif msg_type == "global_leave":
+                    GLOBAL_CLIENTS.pop(id(socket), None)
+                    await broadcast_global_status()
                 elif msg_type == "create":
                     if id(socket) not in SOCKET_ROOM:
                         await create_room(socket, payload)
@@ -187,17 +261,18 @@ async def index(request: web.Request) -> web.StreamResponse:
     if request.headers.get("Upgrade", "").lower() == "websocket":
         return await websocket_handler(request)
     return web.json_response({
-        "service": "Cell Defender CO-OP & Update Server",
+        "service": "Cell Defender CO-OP, Global Chat & Update Server",
         "status": "online",
         "rooms": len(ROOMS),
         "players": sum(1 + int(room.guest is not None) for room in ROOMS.values()),
+        "global_chat_online": len(GLOBAL_CLIENTS),
         "websocket": "wss://" + request.host,
         "update_api": "/api/update",
     })
 
 
 async def health(request: web.Request) -> web.Response:
-    return web.json_response({"ok": True, "rooms": len(ROOMS), "time": int(time.time())})
+    return web.json_response({"ok": True, "rooms": len(ROOMS), "global_chat_online": len(GLOBAL_CLIENTS), "time": int(time.time())})
 
 
 async def stats(request: web.Request) -> web.Response:
@@ -205,14 +280,16 @@ async def stats(request: web.Request) -> web.Response:
         "rooms": len(ROOMS),
         "players": sum(1 + int(room.guest is not None) for room in ROOMS.values()),
         "started_rooms": sum(int(room.started) for room in ROOMS.values()),
-        "uptime_note": "Stan pokoi jest przechowywany w pamięci serwera.",
+        "global_chat_online": len(GLOBAL_CLIENTS),
+        "global_chat_history": len(GLOBAL_HISTORY),
+        "uptime_note": "Pokoje i historia chatu są przechowywane w pamięci serwera.",
     })
 
 
 async def update_manifest(request: web.Request) -> web.Response:
     if not MANIFEST_PATH.exists():
         return web.json_response({
-            "version": "2.1.0",
+            "version": "2.2.0",
             "notes": "Brak opublikowanego pakietu aktualizacji.",
             "mandatory": False,
             "packages": {},

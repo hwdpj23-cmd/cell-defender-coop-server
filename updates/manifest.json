@@ -1,13 +1,18 @@
 {
-  "version": "2.1.0",
-  "published_at": "2026-08-01T22:02:12Z",
-  "notes": "Prostsze tworzenie i dołączanie do pokoi, wklejanie kodu i adresu, automatyczne ponawianie połączenia oraz pełny system aktualizacji online z kopią zapasową i ponownym uruchomieniem gry.",
+  "version": "2.2.0",
+  "published_at": "2026-08-02T10:13:19Z",
+  "notes": "Globalny chat, calkowicie nowy wyglad menu, 3 nowe rozdzialy oraz wyzsze poziomy broni i mutacji.",
   "mandatory": false,
   "packages": {
     "source": {
-      "url": "/updates/cell-defender-source-2.1.0.zip",
-      "sha256": "531d011648bfe758bf50407b1ea0d935e1ab5b1d01db4f43ad3b117d9b4ad34a",
-      "size": 2824437
+      "url": "/updates/cell-defender-source-2.2.0.zip",
+      "sha256": "38472ceef5052384f1387134ad6de75792c6c41d798fe15f82d6910a75f02b50",
+      "size": 3243311
+    },
+    "windows": {
+      "url": "/updates/cell-defender-windows-2.2.0.zip",
+      "sha256": "7930cedffb14dad08ca019ce81d57c83c46d6748e427d588d5beb4c4b78fb741",
+      "size": 21274497
     }
   }
 }
