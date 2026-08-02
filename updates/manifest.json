@@ -11,8 +11,8 @@
     },
     "windows": {
       "url": "https://github.com/hwdpj23-cmd/cell-defender-coop-server/releases/download/v2.2.2/cell-defender-windows-2.2.2.zip",
-      "sha256": "TUTAJ_HASH_WYGENEROWANY_PRZEZ_SKRYPT",
-      "size": 0
+      "sha256": "aab11e09eb0c21d3fd9145a330e300444a2cb86b76c5ff5c23d0a22f4faf119a",
+      "size": 2813328
     }
   }
 }
